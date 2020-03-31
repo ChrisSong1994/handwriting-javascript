@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Document</title>
+</head>
+
+<body>
+    <script>
+
+        // 要求规范 (https://promisesaplus.com/)
+
+        // 包含静态方法：all,resolve,reject,race
+        // 包含原型方法：then,catch,finally
+
+        // 定义状态常量
+        const PENDING = 'pending'
+        const FULFILLED = 'fulfilled'
+        const REJECTED = 'rejected'
+
+        // 传入执行函数，立即执行，包含resolve/reject 参数
+        const MyPromise = function (exector) {
+            const self = this  // 需要在resolve和reject 函数内绑定promise的this 
+            this.status = PENDING
+            this.value = undefined
+            this.reason = undefined
+            this.onFullfilledArray = []
+            this.onRejectedArray = []
+
+            function resolve(value) {
+                if (self.status === PENDING) {
+                    self.status = FULFILLED
+                    self.value = value
+                    self.onFullfilledArray.forEach(func => {
+                        func(self.value)
+                    })
+                }
+            }
+
+            function reject(reason) {
+                if (self.status = PENDING) {
+                    self.status = REJECTED
+                    self.reason = reason
+                    self.onRejectedArray.forEach(func => {
+                        func(self.reason)
+                    })
+                }
+            }
+
+            try {
+                exector(resolve, reject)
+            } catch (err) {
+                reject(err)
+            }
+        }
+
+        // 私有方法
+        const isComplexDataType = (obj) => {
+            return (typeof obj === 'object' || typeof obj === 'function') && typeof obj !== null
+        }
+
+        // 处理返回数据
+        // 对于resolve 可能接收的参数做一个分类处理
+        // 1.假如promise 和 x 是同一个引用则抛出一个TypeError
+        // 2.x是promise 则直接返回promise
+        // 3.x是一个thenable 对象或者函数则把resolve 和reject 注册到thenable 中
+        // 4.如果像是一个普通对象或者其他则作为resolve 的参数 value 执行
+        function resolvePromise(promise, x, resolve, reject) {
+
+            if (promise === x) throw new TypeError('cycle reference')
+
+            // 如果同时调用resolve和reject，或者对同一参数进行了多次调用，则第一个调用优先，而所有其他调用均被忽略。
+            // resolve 和 reject 不可能同时被调用
+
+            let isUesd = false
+            // 类型判断
+            if (isComplexDataType(x)) {
+                try {
+                    const then = x.then
+                    // 判断出x是一个 thenable,如果是则调用x的then函数
+                    if (typeof then === 'function') {
+                        then.call(x,
+                            function (y) {
+                                if (isUsed) return
+                                isUsed = true
+                                resolvePromise(promise, y, resolve, reject)
+                            }, function (err) {
+                                if (isUsed) return
+                                isUsed = true
+                                reject(err)
+                            })
+                    } else {
+                        resolve(x)
+                    }
+                } catch (err) {
+                    if (isUsed) return
+                    isUsed = true
+                    reject(err)
+                }
+            } else {
+                resolve(x)
+            }
+        }
+
+        // 原型方法
+        // then方法和执行器 executor一样是立即执行函数
+        // then 主要用来把代执行的函数push到任务栈
+        // 返回一个promise 
+        MyPromise.prototype.then = function (onFullfilled, onRejected) {
+            // 参数判断，如果onFullfilled和onRejected 不是函数则被忽略(返回一个函数)
+            if (typeof onFullfilled !== 'function') {
+                onFullfilled = (v) => v
+            }
+            if (typeof onRejected !== 'function') {
+                onRejected = (v) => v
+            }
+
+            const self = this  // 调用当前promise的方法
+            let nextPromise
+            switch (self.status) {
+                case PENDING:
+                    nextPromise = new MyPromise((resolve, reject) => {
+                        self.onFullfilledArray.push(function () {
+                            setTimeout(function () {  // setTimeout的目的是为了实现规范中所有的then 方法注册的方法都要在程序代码后面执行
+                                try {
+                                    const x = onFullfilled(self.value)
+                                    resolvePromise(nextPromise, x, resolve, reject)
+                                } catch (err) {
+                                    reject(err)
+                                }
+                            })
+                        })
+
+                        self.onRejectedArray.push(function () {
+                            setTimeout(function () {
+                                try {
+                                    const x = onRejected(self.reason)
+                                    resolvePromise(nextPromise, x, resolve, reject)
+                                } catch (err) {
+                                    reject(err)
+                                }
+                            })
+                        })
+                    })
+                    break;
+
+                case FULFILLED:
+                    nextPromise = new MyPromise((resolve, reject) => {
+                        setTimeout(function () {  // setTimeout的目的是为了实现规范中所有的then 方法注册的方法都要在程序代码后面执行
+                            try {
+                                const x = onFullfilled(self.value)
+                                resolvePromise(nextPromise, x, resolve, reject)
+                            } catch (err) {
+                                reject(err)
+                            }
+                        })
+                    })
+                    break;
+
+                case REJECTED:
+                    nextPromise = new MyPromise((resolve, reject) => {
+                        setTimeout(function () {  // setTimeout的目的是为了实现规范中所有的then 方法注册的方法都要在程序代码后面执行
+                            try {
+                                const x = onRejected(self.value)
+                                resolvePromise(nextPromise, x, resolve, reject)
+                            } catch (err) {
+                                reject(err)
+                            }
+                        })
+                    })
+                    break;
+            }
+
+            return nextPromise
+        }
+
+        MyPromise.prototype.catch = function (onRejected) {
+            return this.then(null, onRejected)
+
+        }
+
+        // 静态方法
+        /**
+        * resolve:resolve(value) 返回一个以给定值解析后的Promise 对象.
+        * 1.value 是一个promise 直接返回
+        * 2.value 是一个thenable 返回一个peomise 跟随thenable 的状态
+        * 3.value 是一个普通值，返回 成功状态调用
+        */
+        MyPromise.resolve = function (value) {
+            if (value instanceof MyPromise) {
+                return value
+            }
+
+            return new MyPromise((resolve, reject) => {
+                // 是否是thenable函数
+                if (value && typeof value === 'function' && value.then) {
+                    setTimeout(() => {
+                        value.then(resolve, reject)
+                    })
+
+                } else {
+                    resolve(value)
+                }
+            })
+        }
+
+
+
+
+
+
+
+        // test
+
+        const asyncNum = () => {
+            return new MyPromise((resolve, reject) => {
+                setTimeout(() => {
+                    const num = Math.random() * 10
+                    if (num > 5) {
+                        resolve('success')
+                    } else {
+                        debugger
+                        reject('fail')
+                    }
+                }, 3000)
+            })
+        }
+
+        // asyncNum().then(function (value) {
+        //     console.log(value)
+        //     return 'success1'
+        // }, function (reason) {
+        //     console.log(reason)
+        //     return 'fail1'
+        // }).then(function (value) {
+        //     console.log(value)
+        // }, function (reason) {
+        //     console.log(reason)
+        // })
+
+
+        // resolve 测试
+        MyPromise.resolve('success').then((data) => {
+            console.log(data)
+        })
+
+        MyPromise.resolve(asyncNum()).then((data) => {
+            console.log(data)
+        }).catch(err => console.log(err))
+
+
+
+
+
+    </script>
+</body>
+
+</html>
