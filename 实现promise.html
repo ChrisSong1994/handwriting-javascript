@@ -177,8 +177,18 @@
             return nextPromise
         }
 
+        // then 的一种特例，只接受一个onRejected
         MyPromise.prototype.catch = function (onRejected) {
             return this.then(null, onRejected)
+        }
+
+        //  不管前面的状态变成什么最后都会执行
+        MyPromise.prototype.finally = function (callback) {
+            let P = this.constructor
+            return this.then(
+                (value) => { P.resolve(callback()).then(() => value) },
+                (reason) => { P.resolve(callback()).then(() => { throw reason }) }
+            )
 
         }
 
@@ -243,13 +253,15 @@
 
 
         // resolve 测试
-        MyPromise.resolve('success').then((data) => {
-            console.log(data)
-        })
+        // MyPromise.resolve('success').then((data) => {
+        //     console.log(data)
+        // })
 
         MyPromise.resolve(asyncNum()).then((data) => {
             console.log(data)
-        }).catch(err => console.log(err))
+        }).catch(err => console.log(err)).finally(() => {
+            console.log('final')
+        })
 
 
 
